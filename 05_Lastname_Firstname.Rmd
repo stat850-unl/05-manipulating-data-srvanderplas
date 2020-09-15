@@ -52,6 +52,173 @@ If you are interested, you can use the `syllables` function in the R package `qu
 
 Hints: `stringr` is the package for text manipulation. `str_split` will split lines into words. You may also find `unnest` from the `tidyr` package to be useful 
 
+```{r}
+library(tidyverse) 
+
+step1 <- tibble(lines = readLines("the_raven_poe.txt")) %>%
+  # Create line number
+  mutate(line_no = 1:n())
+
+step2 <- step1 %>%
+  mutate(n_words = str_count(lines, " "),
+         # If there are any spaces present, there's a word on each side of the 
+         # space, so we need to add 1 to get a good count...
+         n_words = ifelse(n_words > 0, n_words + 1, n_words))
+```
+
+A more sophisticated option would be to look at `?str_count` and see that there is a `boundary()` function that can be used to count words.
+
+
+```{r}
+step2_alt <- step1 %>%
+  mutate(n_words = str_count(lines, boundary("word")))
+```
+
+As blank lines between stanzas indicate a break, we can look for `n_words == 0` to show the stanza breaks. If we then use cumsum() (cumulative sum) over the binary variable `n_words == 0`, then we'll have 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, ... a stanza count starting at 0.
+```{r}
+step3 <- step2 %>%
+  mutate(stanza = cumsum(n_words == 0) + 1)
+```
+
+Now that we have stanza numbers, we can create a column with line numbers using group_by and row_number() within groups.
+
+We don't want to count the 0-word lines as actual lines here. So let's filter them out first!
+
+```{r}
+step4 <- step3 %>%
+  filter(n_words > 0) %>%
+  group_by(stanza) %>%
+  mutate(line = row_number()) %>%
+  ungroup()
+```
+
+There are lots of discernible patterns here... it's poetry, afterall. But lets see what we can come up with...
+
+If we use the boundary() function to split on, it will automatically ditch any punctuation for us that's at the end of a word. So that saves us some time.
+
+```{r}
+step5 <- step4 %>%
+  mutate(words = str_split(lines, boundary("word"))) %>%
+  unnest(cols = c(words)) %>%
+  group_by(line_no) %>%
+  mutate(word_no = 1:n(),
+         n_char = nchar(words))
+```
+
+We could start out looking at the number of characters per word, though that may or may not tell us anything...
+
+```{r}
+ggplot(step5, aes(x = word_no, y = jitter(n_char), group = line_no)) + 
+  geom_line() + 
+  # add a single smooth line for all line numbers
+  geom_smooth(aes(x = word_no, y = n_char), inherit.aes = F)
+
+ggplot(step5, aes(x = word_no, y = n_char, group = line)) + geom_line() + 
+  facet_wrap(~stanza)
+
+
+ggplot(step5, aes(x = word_no, y = n_char, group = line)) + geom_line() + 
+  facet_wrap(~stanza, labeller = label_both)
+```
+
+Not a whole lot there. But what if we look for specific motifs? The plots below are similar to ridgeline plots - essentially, each stanza or line is shown on the y-axis, with changes in the height of that line based on the actual variable of interest.
+
+```{r}
+religious_regex <- "saint|soul|forgiveness|plutonian|hope|censer|seraphim|angel|tempter|prophet|devil|heaven|aidenn|god|balm|gilead|demon" #aidenn = eden
+
+death_regex <- "ghost|lost|angels|soul|mortal|grave|ghastly|plutonian|living|dirge"
+
+step5 <- step5 %>%
+  # This pattern is anything ending with either ore or oor. 
+  mutate(rhymes_with_ore = str_detect(words, "(ore|oor)$"),
+         ing = str_detect(words, "ing$"),
+         religious = str_detect(str_to_lower(words), religious_regex),
+         death = str_detect(str_to_lower(words), death_regex)) %>%
+  group_by(stanza, line) %>%
+  mutate(position = (word_no - 1)/(max(word_no) - 1))
+
+ggplot(step5, aes(x = position, y = stanza + 0.5 * rhymes_with_ore)) + 
+  geom_line(aes(group = line_no, color = factor(stanza))) + 
+  geom_point(data = filter(step5, rhymes_with_ore), aes(color = factor(stanza))) + 
+  facet_wrap(~line, labeller = label_both) + 
+  ylab("Stanza") +
+  ggtitle("Words ending with ore/oor") + 
+  guides(color = "none") + 
+  # Reverse the scale so that 1 is at the top
+  scale_y_reverse()
+```
+
+There are a lot of verbs with "ing" at the end; are there patterns there?
+```{r}
+ggplot(step5, aes(x = position, y = stanza + 0.5 * ing)) + 
+  geom_line(aes(group = line_no, color = factor(stanza))) + 
+  geom_point(data = filter(step5, ing), aes(color = factor(stanza))) + 
+  facet_wrap(~line, labeller = label_both) + 
+  ylab("Stanza") +
+  ggtitle("Words ending with ing") + 
+  guides(color = "none") + 
+  # Reverse the scale so that 1 is at the top
+  scale_y_reverse()
+
+ggplot(step5, aes(x = position, y = line + 0.5 * ing)) + 
+  geom_line(aes(group = line_no, color = factor(line))) + 
+  geom_point(data = filter(step5, ing), aes(color = factor(line))) + 
+  facet_wrap(~stanza, labeller = label_both, ncol = 9) + 
+  ylab("Line") +
+  ggtitle("Words ending with ing") + 
+  guides(color = "none") + 
+  # Reverse the scale so that 1 is at the top
+  scale_y_reverse()
+```
+
+```{r}
+ggplot(step5, aes(x = position, y = stanza + 0.5 * religious)) + 
+  geom_line(aes(group = line_no, color = factor(stanza))) + 
+  geom_point(data = filter(step5, religious), aes(color = factor(stanza))) + 
+  facet_wrap(~line, labeller = label_both) + 
+  ylab("Stanza") +
+  ggtitle("Religious words") + 
+  guides(color = "none") + 
+  # Reverse the scale so that 1 is at the top
+  scale_y_reverse()
+
+ggplot(step5, aes(x = position, y = line + 0.5 * religious)) + 
+  geom_line(aes(group = line_no, color = factor(line))) + 
+  geom_point(data = filter(step5, religious), aes(color = factor(line))) + 
+  facet_wrap(~stanza, labeller = label_both, ncol = 9) + 
+  ylab("Line") +
+  ggtitle("Religious words") + 
+  guides(color = "none") + 
+  # Reverse the scale so that 1 is at the top
+  scale_y_reverse()
+```
+
+```{r}
+ggplot(step5, aes(x = position, y = stanza + 0.5 * death)) +
+  geom_line(aes(group = line_no, color = factor(stanza))) + 
+  geom_point(data = filter(step5, death), aes(color = factor(stanza))) + 
+  facet_wrap(~line, labeller = label_both) + 
+  ylab("Stanza") +
+  ggtitle("Death-related words") + 
+  guides(color = "none") + 
+  # Reverse the scale so that 1 is at the top
+  scale_y_reverse()
+
+ggplot(step5, aes(x = position, y = line + 0.5 * death)) + 
+  geom_line(aes(group = line_no, color = factor(line))) + 
+  geom_point(data = filter(step5, death), aes(color = factor(line))) + 
+  facet_wrap(~stanza, labeller = label_both, ncol = 9) + 
+  ylab("Line") +
+  ggtitle("Death-related words") + 
+  guides(color = "none") + 
+  # Reverse the scale so that 1 is at the top
+  scale_y_reverse()
+```
+
+I'm not sure how useful any of these are, but we can at least analyze them?
+
+It might be better to go through using syllables to count position.
+
 ## Superstitions?
 
 Five Thirty Eight published a story called ["Some people are too superstitious to have a baby on Friday the 13th"](http://fivethirtyeight.com/features/some-people-are-too-superstitious-to-have-a-baby-on-friday-the-13th/), and, along with the story, they published the data to [this github repo](https://github.com/fivethirtyeight/data/tree/master/births). Download one of the CSVs in the repository and read it into SAS. 
