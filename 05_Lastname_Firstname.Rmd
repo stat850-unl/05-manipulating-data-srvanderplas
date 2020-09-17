@@ -334,20 +334,142 @@ Five Thirty Eight published a story called ["Some people are too superstitious t
 
 1. Aggregate the data by month - is there any difference in the average number of births each month, across different months?
 
-```{r, engine="sashtmllog", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
-filename cdcurl URL "https://raw.githubusercontent.com/fivethirtyeight/data/master/births/US_births_1994-2003_CDC_NCHS.csv";
+```{r}
+# I couldn't get the data to read in from the CSV file directly in SAS. Lets see if R will do it
+cdc <- readr::read_csv('https://raw.githubusercontent.com/fivethirtyeight/data/master/births/US_births_1994-2003_CDC_NCHS.csv')
+readr::write_csv(cdc, "cdc.csv", na = ".")
+```
 
-PROC IMPORT DATAFILE = cdcurl OUT = cdc
+```{r, engine="sashtmllog", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
+PROC IMPORT FILE = 'cdc.csv' OUT = cdc
     DBMS = CSV 
     REPLACE; 
     GETNAMES = YES;
-    GUESSINGROWS = 22000;
+RUN;
+
+PROC SQL;
+    CREATE TABLE cdcmonthavg AS
+    SELECT month, mean(births) AS births FROM cdc
+    GROUP BY month;
+RUN;
+    
+    
+ods listing style=listing;
+ods graphics / width=6in height=3in;
+
+title 'Births by Month';
+PROC SGPLOT DATA=cdcmonthavg;
+  vbar month / response = births;
 RUN;
 ```
 
+There are slightly more births in summer months than in the fall and winter. 
 
 2. Aggregate the data by day of the week. Are there any days of the week that are less likely to have births?
 
+```{r, engine="sashtmllog", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
+PROC SQL;
+    CREATE TABLE cdcwdayavg AS
+    SELECT day_of_week, mean(births) AS births FROM cdc
+    GROUP BY day_of_week;
+RUN;
+    
+    
+ods listing style=listing;
+ods graphics / width=6in height=3in;
+
+title 'Births by Day of Week';
+PROC SGPLOT DATA=cdcwdayavg;
+  vbar day_of_week / response = births;
+RUN;
+```
+
+The codebook/readme says that 1 = Monday, so 6 = Saturday and 7 = Sunday. It looks like births are less common on weekends, and somewhat less common on Mondays. This might be because women are scheduled to be admitted/induced on Monday and some of those women don't give birth until Tuesday.
+
 3. Compute the day of the year (so Feb 1 would be 32, June 25 would be 176 if the year isn't a leap year, and 177 otherwise, and so on). What can you say about overall trends based on the day of the year? Are there any that would not be attributable to regular holidays, such as Memorial day, Labor Day, and Christmas? (Thanksgiving and Easter rotate around a bit more). Bonus points if you can figure out a macro that will compute this based on the year, month, and date.
 
+[Day of year can be computeed using the intnx() function](https://communities.sas.com/t5/SAS-Procedures/Day-of-the-Year/td-p/9542)
+
+```{r, engine="sashtmllog", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
+DATA cdc;
+SET cdc;
+date = MDY(month, date_of_month, year);
+FORMAT date YYMMDD10.;
+doy = date - intnx('year', date, 0) + 1;
+RUN;
+
+ods listing style=listing;
+ods graphics / width=9in height=6in;
+
+title 'Births by Day of Year';
+PROC SGPLOT DATA=cdc;
+  series x = doy y = births / group = year;
+RUN;
+/* I left this one in because it is kinda trippy */
+/* But the only useful thing you can see in it is christmas */
+```
+
+The individual lines for each year thing didn't work out that well, so let's aggregate. 
+```{r, engine="sashtmllog", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
+PROC SQL;
+    CREATE TABLE cdc_doy AS
+    SELECT doy, mean(births) AS births FROM cdc
+    GROUP BY doy;
+RUN;
+
+ods listing style=listing;
+ods graphics / width=9in height=6in;
+
+title 'Births by Day of Year';
+PROC SGPLOT DATA=cdc_doy;
+  series x = doy y = births;
+    XAXIS VALUES = (0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365)
+    VALUESDISPLAY = ("Jan" "Feb" "Mar" "Apr" "May" "Jun" "Jul" "Aug" "Sep" "Oct" "Nov" "Dec" "Jan");
+RUN;
+```
+
+This is much easier - we can see that New Years Eve/Day have much lower births, Feb 14 has higher births, there are drops in March-April (Easter), May-June (Memorial Day), July (Independence Day), September (Labor Day), November (Thanksgiving), and a huge drop at Christmas. 
+
+
 4. Think through some way to numerically compare the births on Fridays (not the 13th) with births on Fridays that are the 13th. You can fit a model, compute means and subtract them -- whatever you think is appropriate. I will evaluate you on your code and logic, not on your statistical skills. 
+
+```{r, engine="sashtmllog", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
+PROC FORMAT;
+  VALUE wday 1 = "Mon" 2 = "Tues" 3 = "Wed" 4 = "Thurs" 5 = "Fri" 6 = "Sat" 7 = "Sun";
+  VALUE mon 1 = "Jan" 2 = "Feb" 3 = "Mar" 4 = "Apr" 5 = "May" 6 = "Jun" 7 = "Jul" 8 = "Aug" 9 = "Sept" 10 = "Oct" 11 = "Nov" 12 = "Dec";
+
+  /* Remove holidays that are not likely to affect US doctor behavior */
+  VALUE $hol 
+  'BOXING' = 'NONE' 'CANADA' = 'NONE' 'CANADAOBSERVED' = 'NONE' 
+  'THANKSGIVINGCANADA' = 'NONE' 'VICTORIA' = 'NONE' 
+  'VETERANSUSG' = 'NONE'  'MLK' = 'NONE' 'USPRESIDENTS' = 'NONE' 'VETERANS' = 'NONE' 
+  'MOTHERS' = 'NONE' 'FATHERS' = 'NONE' 
+  'HALLOWEEN' = 'NONE' '.' = 'NONE' other = [$15.];
+RUN;
+
+DATA cdc;
+SET cdc;
+holiday = HOLIDAYNAME(date, 1, 'en_US');
+FORMAT day_of_week wday. month mon. holiday $hol.;
+IF date_of_month = 13 THEN is13 = 1;
+ELSE is13 = 0;
+f13 = is13 * (day_of_week = 5);
+RUN;
+
+DATA CDC; SET CDC;
+IF STRIP(holiday) in ('', '.', 'NONE') then holiday='NONE';
+RUN;
+
+/* check to make sure this is correct */
+PROC FREQ DATA = CDC;
+table holiday f13;
+RUN;
+
+PROC glm DATA = cdc;
+CLASS holiday month day_of_week f13;
+MODEL births = month day_of_week f13 holiday;
+ESTIMATE 'Friday the 13th' f13 -1 1;
+RUN;
+```
+
+On Friday the 13th, approximately 633 fewer babies are born than would be expected after controlling for the weekday, whether the date is a holiday, and the month. 
