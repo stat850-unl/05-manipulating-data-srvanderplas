@@ -1,6 +1,6 @@
 ---
 title: "Homework: Manipulating Data"
-author: "Firstname Lastname"
+author: "Key"
 output: html_document
 ---
 
@@ -340,7 +340,7 @@ cdc <- readr::read_csv('https://raw.githubusercontent.com/fivethirtyeight/data/m
 readr::write_csv(cdc, "cdc.csv", na = ".")
 ```
 
-```{r, engine="sashtmllog", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
+```{r, engine="sashtml", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
 PROC IMPORT FILE = 'cdc.csv' OUT = cdc
     DBMS = CSV 
     REPLACE; 
@@ -367,7 +367,7 @@ There are slightly more births in summer months than in the fall and winter.
 
 2. Aggregate the data by day of the week. Are there any days of the week that are less likely to have births?
 
-```{r, engine="sashtmllog", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
+```{r, engine="sashtml", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
 PROC SQL;
     CREATE TABLE cdcwdayavg AS
     SELECT day_of_week, mean(births) AS births FROM cdc
@@ -390,7 +390,7 @@ The codebook/readme says that 1 = Monday, so 6 = Saturday and 7 = Sunday. It loo
 
 [Day of year can be computeed using the intnx() function](https://communities.sas.com/t5/SAS-Procedures/Day-of-the-Year/td-p/9542)
 
-```{r, engine="sashtmllog", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
+```{r, engine="sashtml", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
 DATA cdc;
 SET cdc;
 date = MDY(month, date_of_month, year);
@@ -410,7 +410,7 @@ RUN;
 ```
 
 The individual lines for each year thing didn't work out that well, so let's aggregate. 
-```{r, engine="sashtmllog", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
+```{r, engine="sashtml", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
 PROC SQL;
     CREATE TABLE cdc_doy AS
     SELECT doy, mean(births) AS births FROM cdc
@@ -433,7 +433,7 @@ This is much easier - we can see that New Years Eve/Day have much lower births, 
 
 4. Think through some way to numerically compare the births on Fridays (not the 13th) with births on Fridays that are the 13th. You can fit a model, compute means and subtract them -- whatever you think is appropriate. I will evaluate you on your code and logic, not on your statistical skills. 
 
-```{r, engine="sashtmllog", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
+```{r, engine="sashtml", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
 PROC FORMAT;
   VALUE wday 1 = "Mon" 2 = "Tues" 3 = "Wed" 4 = "Thurs" 5 = "Fri" 6 = "Sat" 7 = "Sun";
   VALUE mon 1 = "Jan" 2 = "Feb" 3 = "Mar" 4 = "Apr" 5 = "May" 6 = "Jun" 7 = "Jul" 8 = "Aug" 9 = "Sept" 10 = "Oct" 11 = "Nov" 12 = "Dec";
