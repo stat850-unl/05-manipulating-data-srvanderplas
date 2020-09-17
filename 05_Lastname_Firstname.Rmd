@@ -7,20 +7,22 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 options(digits = 3)
+
+library(tidyverse) 
 ```
 
 
 ```{r load-sas-libraries, echo = F, message = F, warning = F}
 
-library(SASmarkdown)
-sas_enginesetup(sashtml=sashtml)
-
-sasexe <- "C:/Program Files/SASHome/SASFoundation/9.4/sas.exe"
-sasopts <- "-nosplash -ls 75"
+# sasexe <- "C:/Program Files/SASHome/SASFoundation/9.4/sas.exe"
+# sasopts <- "-nosplash -ls 75"
 
 # Linux options (for grading, please leave this in!)
-# sasexe <- "/usr/local/SASHome/SASFoundation/9.4/bin/sas_en"
-# sasopts <- "-ls 75"
+sasexe <- "/usr/local/SASHome/SASFoundation/9.4/bin/sas_en"
+sasopts <- "-ls 75"
+
+library(SASmarkdown)
+
 ```
 
 ## Instructions
@@ -52,18 +54,39 @@ If you are interested, you can use the `syllables` function in the R package `qu
 
 Hints: `stringr` is the package for text manipulation. `str_split` will split lines into words. You may also find `unnest` from the `tidyr` package to be useful 
 
-```{r}
-library(tidyverse) 
+### Initial processing
 
+```{r}
 step1 <- tibble(lines = readLines("the_raven_poe.txt")) %>%
   # Create line number
   mutate(line_no = 1:n())
 
+knitr::kable(head(step1, 10))
+```
+
+It would also be reasonable to use only the non-blank lines as line numbers.
+
+```{r}
+step1_alt <- tibble(lines = readLines("the_raven_poe.txt")) %>%
+  mutate(
+    # Count the cumulative number of lines which aren't blanks
+    line_no = cumsum(lines != ""),
+    # Replace the counts of blank lines with NA
+    line_no = ifelse(lines == "", NA, line_no))
+
+knitr::kable(head(step1_alt, 10))
+```
+
+Either option is ok for our purposes. 
+
+```{r}
 step2 <- step1 %>%
   mutate(n_words = str_count(lines, " "),
          # If there are any spaces present, there's a word on each side of the 
          # space, so we need to add 1 to get a good count...
          n_words = ifelse(n_words > 0, n_words + 1, n_words))
+
+knitr::kable(head(step2, 10))
 ```
 
 A more sophisticated option would be to look at `?str_count` and see that there is a `boundary()` function that can be used to count words.
@@ -72,12 +95,16 @@ A more sophisticated option would be to look at `?str_count` and see that there 
 ```{r}
 step2_alt <- step1 %>%
   mutate(n_words = str_count(lines, boundary("word")))
+
+knitr::kable(head(step2_alt, 10))
 ```
 
 As blank lines between stanzas indicate a break, we can look for `n_words == 0` to show the stanza breaks. If we then use cumsum() (cumulative sum) over the binary variable `n_words == 0`, then we'll have 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, ... a stanza count starting at 0.
 ```{r}
 step3 <- step2 %>%
   mutate(stanza = cumsum(n_words == 0) + 1)
+
+knitr::kable(head(step3, 10))
 ```
 
 Now that we have stanza numbers, we can create a column with line numbers using group_by and row_number() within groups.
@@ -90,9 +117,11 @@ step4 <- step3 %>%
   group_by(stanza) %>%
   mutate(line = row_number()) %>%
   ungroup()
+
+knitr::kable(head(step4, 10))
 ```
 
-There are lots of discernible patterns here... it's poetry, afterall. But lets see what we can come up with...
+There are lots of discernible patterns here... it's poetry, after all. But lets see what we can come up with...
 
 If we use the boundary() function to split on, it will automatically ditch any punctuation for us that's at the end of a word. So that saves us some time.
 
@@ -103,6 +132,8 @@ step5 <- step4 %>%
   group_by(line_no) %>%
   mutate(word_no = 1:n(),
          n_char = nchar(words))
+
+knitr::kable(head(step5, 10))
 ```
 
 We could start out looking at the number of characters per word, though that may or may not tell us anything...
@@ -113,41 +144,62 @@ ggplot(step5, aes(x = word_no, y = jitter(n_char), group = line_no)) +
   # add a single smooth line for all line numbers
   geom_smooth(aes(x = word_no, y = n_char), inherit.aes = F)
 
-ggplot(step5, aes(x = word_no, y = n_char, group = line)) + geom_line() + 
-  facet_wrap(~stanza)
+# Nchar by line of the poem
+ggplot(step5, aes(x = word_no, y = n_char, group = line_no)) + geom_line() + 
+  facet_wrap(~line)
 
-
-ggplot(step5, aes(x = word_no, y = n_char, group = line)) + geom_line() + 
+# Nchar by stanza
+ggplot(step5, aes(x = word_no, y = n_char, group = line_no)) + geom_line() + 
   facet_wrap(~stanza, labeller = label_both)
 ```
 
 Not a whole lot there. But what if we look for specific motifs? The plots below are similar to ridgeline plots - essentially, each stanza or line is shown on the y-axis, with changes in the height of that line based on the actual variable of interest.
 
+### Looking for patterns {.tabset}
+
 ```{r}
+# Here, we make regular expressions to look for specific words; chaining them together with | ensures that if any of these words appear, the regex will be activated.
+
+# I used a poetry analysis/interpretation site to get the ideas for these, 
+# then combed through the poem to find a list of reasonable words.
+
 religious_regex <- "saint|soul|forgiveness|plutonian|hope|censer|seraphim|angel|tempter|prophet|devil|heaven|aidenn|god|balm|gilead|demon" #aidenn = eden
+
+knowledge_regex <- "pondered|volume|lore|book|wonder|explore|Raven|Pallas|discourse|meaning|relevancy|bust|linking|think|guess|divining"
+# The bust of Pallas is a reference to the greek goddess Athena (Pallas Athena),
+# the goddess of wisdom/knowledge
 
 death_regex <- "ghost|lost|angels|soul|mortal|grave|ghastly|plutonian|living|dirge"
 
 step5 <- step5 %>%
   # This pattern is anything ending with either ore or oor. 
-  mutate(rhymes_with_ore = str_detect(words, "(ore|oor)$"),
+  # We also have to handle o'er, so we use a punctuation flag instead of trying
+  # to write a regex that can handle that character.
+  mutate(rhymes_with_ore = str_detect(words, "(ore|oor|our|o[[:punct:]]er)$"),
          ing = str_detect(words, "ing$"),
+         knowledge = str_detect(words, knowledge_regex),
          religious = str_detect(str_to_lower(words), religious_regex),
          death = str_detect(str_to_lower(words), death_regex)) %>%
   group_by(stanza, line) %>%
   mutate(position = (word_no - 1)/(max(word_no) - 1))
 
+```
+
+#### Rhyme scheme
+We'll start out with the rhyme scheme first, since that's an easy and obviously recognizable pattern.
+```{r}
 ggplot(step5, aes(x = position, y = stanza + 0.5 * rhymes_with_ore)) + 
   geom_line(aes(group = line_no, color = factor(stanza))) + 
   geom_point(data = filter(step5, rhymes_with_ore), aes(color = factor(stanza))) + 
   facet_wrap(~line, labeller = label_both) + 
   ylab("Stanza") +
-  ggtitle("Words ending with ore/oor") + 
+  ggtitle("Words ending with ore/oor/our/o'er") + 
   guides(color = "none") + 
   # Reverse the scale so that 1 is at the top
   scale_y_reverse()
 ```
 
+#### Action words
 There are a lot of verbs with "ing" at the end; are there patterns there?
 ```{r}
 ggplot(step5, aes(x = position, y = stanza + 0.5 * ing)) + 
@@ -171,6 +223,11 @@ ggplot(step5, aes(x = position, y = line + 0.5 * ing)) +
   scale_y_reverse()
 ```
 
+It seems that there are alternating periods of activity and inactivity throughout this poem - lot so faction in the first part, a brief rest, then some more action in stanzas 8-9, a rest in 10-11, some action in 12-13, and a long rest before the final bit of activity at the end. 
+
+#### Theme: Religion and the afterlife
+Here, we use the religious column (which is 0 if a word doesn't have religious/afterlife connotations, and 1 if it does) to see if there are any patterns in where religious words show up.
+
 ```{r}
 ggplot(step5, aes(x = position, y = stanza + 0.5 * religious)) + 
   geom_line(aes(group = line_no, color = factor(stanza))) + 
@@ -193,6 +250,60 @@ ggplot(step5, aes(x = position, y = line + 0.5 * religious)) +
   scale_y_reverse()
 ```
 
+#### Theme: Knowledge
+What about knowledge? 
+```{r}
+ggplot(step5, aes(x = position, y = stanza + 0.5 * knowledge)) + 
+  geom_line(aes(group = line_no, color = factor(stanza))) + 
+  geom_point(data = filter(step5, knowledge), aes(color = factor(stanza))) + 
+  facet_wrap(~line, labeller = label_both) + 
+  ylab("Stanza") +
+  ggtitle("Knowledge words") + 
+  guides(color = "none") + 
+  # Reverse the scale so that 1 is at the top
+  scale_y_reverse()
+
+ggplot(step5, aes(x = position, y = line + 0.5 * knowledge)) + 
+  geom_line(aes(group = line_no, color = factor(line))) + 
+  geom_point(data = filter(step5, knowledge), aes(color = factor(line))) + 
+  facet_wrap(~stanza, labeller = label_both, ncol = 9) + 
+  ylab("Line") +
+  ggtitle("Knowledge words") + 
+  guides(color = "none") + 
+  # Reverse the scale so that 1 is at the top
+  scale_y_reverse()
+```
+
+#### Theme: Knowledge vs. Religion
+Some interpretations of this poem involve the author wrestling with the alternating pulls of rationality and irrationality. We obviously can't get at actual context here (we're only looking at single words, not constructed meaning) but lets see if the religion vs. knowledge thing holds up a bit, since I'm too lazy to define new regexes for irrationality and rationality.
+
+The code to do this is a bit ugly - next week we'll learn how to do this in a way that lets you actually have a key for the different word types. For now, circle = knowledge, x = religion reference.
+```{r}
+ggplot(step5, aes(x = word_no, y = stanza + 0.5 * knowledge - 0.5 * religious)) + 
+  geom_line(aes(group = line_no, color = factor(stanza))) + 
+  geom_point(data = filter(step5, knowledge), aes(color = factor(stanza)), shape = 16) +
+  geom_point(data = filter(step5, religious), aes(color = factor(stanza)), shape = 4) + 
+  facet_wrap(~line, labeller = label_both) + 
+  ylab("Stanza") +
+  ggtitle("Knowledge and Religion related words") + 
+  guides(color = "none") + 
+  # Reverse the scale so that 1 is at the top
+  scale_y_reverse()
+
+ggplot(step5, aes(x = word_no, y = line + 0.5 * knowledge - 0.5 * religious)) + 
+  geom_line(aes(group = line_no, color = factor(line))) + 
+  geom_point(data = filter(step5, knowledge), aes(color = factor(line)), shape = 16) +
+  geom_point(data = filter(step5, religious), aes(color = factor(line)), shape = 4) + 
+  facet_wrap(~stanza, labeller = label_both, ncol = 9) + 
+  ylab("Line") +
+  ggtitle("Knowledge words") + 
+  guides(color = "none") + 
+  # Reverse the scale so that 1 is at the top
+  scale_y_reverse()
+```
+
+#### Theme: Death
+We can use the same idea with death-related words...
 ```{r}
 ggplot(step5, aes(x = position, y = stanza + 0.5 * death)) +
   geom_line(aes(group = line_no, color = factor(stanza))) + 
@@ -215,15 +326,25 @@ ggplot(step5, aes(x = position, y = line + 0.5 * death)) +
   scale_y_reverse()
 ```
 
-I'm not sure how useful any of these are, but we can at least analyze them?
-
-It might be better to go through using syllables to count position.
+I'm not sure how useful any of these are, but we can at least analyze them. In the first attempt through this problem over the summer, I looked at number of words in the line and was thinking it would be feasible to look at number of syllables in the line as well; now I'm wishing I could find an R package that would tell me where the emphasis is on each word -- but so far I haven't found much. 
 
 ## Superstitions?
 
 Five Thirty Eight published a story called ["Some people are too superstitious to have a baby on Friday the 13th"](http://fivethirtyeight.com/features/some-people-are-too-superstitious-to-have-a-baby-on-friday-the-13th/), and, along with the story, they published the data to [this github repo](https://github.com/fivethirtyeight/data/tree/master/births). Download one of the CSVs in the repository and read it into SAS. 
 
 1. Aggregate the data by month - is there any difference in the average number of births each month, across different months?
+
+```{r, engine="sashtmllog", engine.path=sasexe, engine.opts=sasopts, collectcode = T, error = T}
+filename cdcurl URL "https://raw.githubusercontent.com/fivethirtyeight/data/master/births/US_births_1994-2003_CDC_NCHS.csv";
+
+PROC IMPORT DATAFILE = cdcurl OUT = cdc
+    DBMS = CSV 
+    REPLACE; 
+    GETNAMES = YES;
+    GUESSINGROWS = 22000;
+RUN;
+```
+
 
 2. Aggregate the data by day of the week. Are there any days of the week that are less likely to have births?
 
